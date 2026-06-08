@@ -1,0 +1,14 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  // backend/ — это Deno (Deno.env, npm-специфика): его типы проверяет deno check,
+  // а не tsc. Без исключения `npm run typecheck` падал на «Cannot find name 'Deno'».
+  "exclude": ["node_modules", "backend"]
+}
