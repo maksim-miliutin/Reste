@@ -147,6 +147,52 @@ export const ACTS: ActTariff[] = [
     base: [{ from: '2023-01-01', to: null, value: 23, source: AMELI }],
     rate: [{ from: '2005-01-01', to: null, value: 0.7, source: AMELI }],
   },
+  {
+    code: 'HBLD038',
+    category: 'dental',
+    label: {
+      fr: 'Couronne céramo-métallique',
+      en: 'Ceramic-metal crown',
+      ru: 'Металлокерамическая коронка',
+    },
+    // 100% Santé capped tariff: the base sits below the real price.
+    base: [{ from: '2021-01-01', to: null, value: 120, source: `${AMELI} — CCAM, panier 100 % Santé` }],
+    rate: [{ from: '2005-01-01', to: null, value: 0.7, source: AMELI }],
+  },
+  {
+    code: 'HBFD001',
+    category: 'dental',
+    label: {
+      fr: 'Détartrage',
+      en: 'Scaling',
+      ru: 'Профессиональная чистка',
+    },
+    base: [{ from: '2021-01-01', to: null, value: 28.92, source: `${AMELI} — CCAM` }],
+    rate: [{ from: '2005-01-01', to: null, value: 0.7, source: AMELI }],
+  },
+  {
+    code: 'AMK/AMC',
+    category: 'other',
+    label: {
+      fr: 'Séance de kinésithérapie',
+      en: 'Physiotherapy session',
+      ru: 'Сеанс физиотерапии',
+    },
+    base: [{ from: '2023-01-01', to: null, value: 16.13, source: AMELI }],
+    rate: [{ from: '2005-01-01', to: null, value: 0.6, source: AMELI }],
+  },
+  {
+    code: 'OPT-monture',
+    category: 'optical',
+    label: {
+      fr: 'Monture de lunettes',
+      en: 'Spectacle frame',
+      ru: 'Оправа для очков',
+    },
+    // Token base: in practice the insurer or 100% Santé pays.
+    base: [{ from: '2020-01-01', to: null, value: 0.05, source: `${AMELI} — LPP optique` }],
+    rate: [{ from: '2005-01-01', to: null, value: 0.6, source: AMELI }],
+  },
 ];
 
 /** Value in force on a date. Dates compare as strings — the format sorts. */
