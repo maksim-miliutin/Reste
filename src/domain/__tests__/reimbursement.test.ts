@@ -129,3 +129,78 @@ describe('full coverage (ALD, CSS, pregnancy)', () => {
     expect(r.restACharge).toBe(28.5); // the overrun remains
   });
 });
+
+describe('calculation invariants', () => {
+  const cases = [
+    { act: GP, charged: 30, sector: 'secteur1' as const },
+    { act: SPEC, charged: 90, sector: 'secteur2' as const },
+    { act: CROWN, charged: 1200, sector: 'secteur1' as const },
+    { act: GP, charged: 0, sector: 'secteur1' as const },
+  ];
+
+  it('reimbursements never exceed what was charged', () => {
+    for (const c of cases) {
+      for (const contract of [null, basic, strong]) {
+        const r = computeLine(c, contract, today);
+        expect(r.securiteSociale + r.mutuelle).toBeLessThanOrEqual(r.charged + 0.01);
+      }
+    }
+  });
+
+  it('out-of-pocket is never negative', () => {
+    for (const c of cases) {
+      for (const contract of [null, basic, strong]) {
+        expect(computeLine(c, contract, today).restACharge).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('the parts add up to the charged total', () => {
+    for (const c of cases) {
+      const r = computeLine(c, strong, today);
+      const total = r.securiteSociale + r.mutuelle + r.restACharge;
+      expect(Math.abs(total - r.charged)).toBeLessThan(0.02);
+    }
+  });
+
+  it('every calculation step is exposed', () => {
+    const r = computeLine({ act: CROWN, charged: 800, sector: 'secteur1' }, strong, today);
+    const keys = r.steps.map((s) => s.key);
+    expect(keys).toContain('base');
+    expect(keys).toContain('securiteSociale');
+    expect(keys).toContain('mutuelle');
+    expect(keys).toContain('overrun');
+  });
+
+  it('base and rate carry a source reference', () => {
+    const r = computeLine({ act: GP, charged: 30, sector: 'secteur1' }, null, today);
+    expect(r.steps.find((s) => s.key === 'base')?.source).toBeTruthy();
+    expect(r.steps.find((s) => s.key === 'securiteSociale')?.source).toBeTruthy();
+  });
+});
+
+describe('whole quote', () => {
+  it('sums the lines', () => {
+    const q = computeQuote(
+      [
+        { act: GP, charged: 30, sector: 'secteur1' },
+        { act: CROWN, charged: 800, sector: 'secteur1' },
+      ],
+      basic,
+      today,
+    );
+    expect(q.charged).toBe(830);
+    expect(q.lines.length).toBe(2);
+    expect(Math.abs(q.securiteSociale + q.mutuelle + q.restACharge - q.charged)).toBeLessThan(0.02);
+  });
+
+  it('accounts for quantity', () => {
+    const one = computeQuote([{ act: GP, charged: 30, sector: 'secteur1' }], basic, today);
+    const three = computeQuote(
+      [{ act: GP, charged: 30, sector: 'secteur1', quantity: 3 }],
+      basic,
+      today,
+    );
+    expect(three.charged).toBe(cents(one.charged * 3));
+  });
+});
