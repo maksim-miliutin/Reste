@@ -204,3 +204,50 @@ describe('whole quote', () => {
     expect(three.charged).toBe(cents(one.charged * 3));
   });
 });
+
+describe('base read from the document', () => {
+  it('the devis base wins over the catalogue', () => {
+    // Devis печатает свою базу — она точнее нашего каталога.
+    const r = computeLine(
+      { act: CROWN, charged: 800, sector: 'secteur1', baseOverride: 107.5 },
+      null,
+      today,
+    );
+    expect(r.base).toBe(107.5);
+    expect(r.securiteSociale).toBe(75.25);
+  });
+
+  it('computes an act missing from the catalogue', () => {
+    const r = computeLine(
+      {
+        charged: 450,
+        sector: 'secteur1',
+        baseOverride: 75,
+        rateOverride: 0.7,
+        labelOverride: 'Acte inconnu',
+        category: 'dental',
+      },
+      basic,
+      today,
+    );
+    expect(r.label).toBe('Acte inconnu');
+    expect(r.securiteSociale).toBe(52.5);
+    expect(r.restACharge).toBe(375);
+  });
+
+  it('invents no reimbursement without base or catalogue', () => {
+    const r = computeLine({ charged: 200, sector: 'secteur1' }, basic, today);
+    expect(r.base).toBe(0);
+    expect(r.securiteSociale).toBe(0);
+    expect(r.restACharge).toBe(200);
+  });
+
+  it('marks the base source as the devis', () => {
+    const r = computeLine(
+      { act: CROWN, charged: 800, sector: 'secteur1', baseOverride: 107.5 },
+      null,
+      today,
+    );
+    expect(r.steps.find((s) => s.key === 'base')?.source).toBe('devis');
+  });
+});
