@@ -251,3 +251,187 @@ describe('base read from the document', () => {
     expect(r.steps.find((s) => s.key === 'base')?.source).toBe('devis');
   });
 });
+
+describe('insurer annual cap', () => {
+  const capped: MutuelleContract = {
+    name: 'Dentaire plafonné',
+    responsible: true,
+    coverage: { dental: { kind: 'percentOfBase', percent: 300 } },
+    annualCeiling: { dental: 400 },
+  };
+
+  it('does not cut the payout until the cap is reached', () => {
+    const r = computeLine({ act: CROWN, charged: 800, sector: 'secteur1' }, capped, today);
+    expect(r.mutuelle).toBe(276); // same as without a cap
+    expect(r.cappedByCeiling).toBe(0);
+  });
+
+  it('trims the payout when the year is already spent', () => {
+    const r = computeLine({ act: CROWN, charged: 800, sector: 'secteur1' }, capped, {
+      ...today,
+      consumedThisYear: { dental: 250 },
+    });
+    expect(r.mutuelle).toBe(150); // 400 − 250 left
+    expect(r.cappedByCeiling).toBe(126);
+    expect(r.restACharge).toBe(566);
+  });
+
+  it('an exhausted cap zeroes the insurer share', () => {
+    const r = computeLine({ act: CROWN, charged: 800, sector: 'secteur1' }, capped, {
+      ...today,
+      consumedThisYear: { dental: 400 },
+    });
+    expect(r.mutuelle).toBe(0);
+    expect(r.restACharge).toBe(716); // as if there were no insurer at all
+  });
+
+  it('one category cap does not affect another', () => {
+    const mixed: MutuelleContract = {
+      ...capped,
+      coverage: { ...capped.coverage, consultation: { kind: 'percentOfBase', percent: 100 } },
+    };
+    const r = computeLine({ act: GP, charged: 30, sector: 'secteur1' }, mixed, {
+      ...today,
+      consumedThisYear: { dental: 400 },
+    });
+    expect(r.mutuelle).toBe(9);
+  });
+
+  it('tells the user the cap was applied', () => {
+    const r = computeLine({ act: CROWN, charged: 800, sector: 'secteur1' }, capped, {
+      ...today,
+      consumedThisYear: { dental: 300 },
+    });
+    const step = r.steps.find((s) => s.key === 'ceiling');
+    expect(step).toBeDefined();
+    expect(step?.detail?.ceiling).toBe(400);
+  });
+});
+
+describe('the annual cap is shared across the quote, not per line', () => {
+  const capped: MutuelleContract = {
+    name: 'Confort 300 % / 400 € dentaire',
+    responsible: true,
+    coverage: { dental: { kind: 'percentOfBase', percent: 300 } },
+    annualCeiling: { dental: 400 },
+  };
+
+  it('two crowns in one devis do not each get the full cap', () => {
+    // 300 % от базы 120 € = 360 €, минус доля Sécu 84 € → 276 € на коронку.
+    // €400/year cap: the first takes €276, leaving €124 for the second.
+    const q = computeQuote(
+      [
+        { act: CROWN, charged: 800, sector: 'secteur1' },
+        { act: CROWN, charged: 800, sector: 'secteur1' },
+      ],
+      capped,
+      today,
+    );
+    expect(q.lines[0].mutuelle).toBe(276);
+    expect(q.lines[1].mutuelle).toBe(124);
+    expect(q.mutuelle).toBe(400);
+    expect(q.lines[1].cappedByCeiling).toBe(152);
+  });
+
+  it('a line computed alone knows nothing of its neighbours', () => {
+    const alone = computeLine({ act: CROWN, charged: 800, sector: 'secteur1' }, capped, today);
+    const inQuote = computeQuote(
+      [
+        { act: CROWN, charged: 800, sector: 'secteur1' },
+        { act: CROWN, charged: 800, sector: 'secteur1' },
+      ],
+      capped,
+      today,
+    );
+    expect(alone.mutuelle).toBe(276);
+    expect(inQuote.mutuelle).toBeLessThan(cents(alone.mutuelle * 2));
+  });
+
+  it('yearly consumption is deducted before the first line', () => {
+    const q = computeQuote([{ act: CROWN, charged: 800, sector: 'secteur1' }], capped, {
+      ...today,
+      consumedThisYear: { dental: 350 },
+    });
+    expect(q.lines[0].mutuelle).toBe(50);
+    expect(q.lines[0].cappedByCeiling).toBe(226);
+  });
+});
+
+describe('daily cap on deductions', () => {
+  it('five consultations in one day cost €8, not €10', () => {
+    const q = computeQuote(
+      Array.from({ length: 5 }, () => ({ act: GP, charged: 30, sector: 'secteur1' as const })),
+      null,
+      today,
+    );
+    const total = cents(q.lines.reduce((a, l) => a + l.participation, 0));
+    expect(total).toBe(8);
+    expect(q.securiteSociale).toBe(97); // 5 × 21 − 8
+  });
+
+  it('the cap applies within a single line with quantity', () => {
+    const q = computeQuote([{ act: GP, charged: 30, sector: 'secteur1', quantity: 5 }], null, today);
+    expect(q.lines[0].participation).toBe(8);
+    expect(q.securiteSociale).toBe(97);
+  });
+
+  it('the step reports that the cap applied', () => {
+    const q = computeQuote([{ act: GP, charged: 30, sector: 'secteur1', quantity: 5 }], null, today);
+    const step = q.lines[0].steps.find((s) => s.key === 'participation');
+    expect(step?.detail?.dailyCap).toBe(8);
+  });
+});
+
+describe('an unknown base differs from a zero base', () => {
+  it('marks the line as uncomputable without code or base', () => {
+    const q = computeQuote(
+      [{ charged: 500, sector: 'secteur1', category: 'dental', labelOverride: 'Implant' }],
+      basic,
+      today,
+    );
+    expect(q.lines[0].baseKnown).toBe(false);
+    expect(q.unknownLines).toBe(1);
+    expect(q.lines[0].restACharge).toBe(500);
+  });
+
+  it('a zero base from the document is known, not missing', () => {
+    const q = computeQuote(
+      [{ charged: 500, sector: 'secteur1', category: 'dental', baseOverride: 0 }],
+      basic,
+      today,
+    );
+    expect(q.lines[0].baseKnown).toBe(true);
+    expect(q.unknownLines).toBe(0);
+  });
+
+  it('act exists but no tariff was in force on that date', () => {
+    const r = computeLine({ act: GP, charged: 30, sector: 'secteur1' }, null, {
+      date: '2010-01-01',
+      coordinatedPathway: true,
+    });
+    expect(r.baseKnown).toBe(false);
+  });
+});
+
+describe('ALD does not exempt from the participation forfaitaire', () => {
+  it('100% reimbursement but the €2 still applies', () => {
+    const r = computeLine({ act: GP, charged: 30, sector: 'secteur1' }, null, {
+      date: '2026-07-01',
+      coordinatedPathway: true,
+      fullCoverage: true,
+    });
+    expect(r.securiteSociale).toBe(28);
+    expect(r.restACharge).toBe(2);
+  });
+
+  it('exemption is separate: CSS, AME, minors, pregnancy 6+', () => {
+    const r = computeLine({ act: GP, charged: 30, sector: 'secteur1' }, null, {
+      date: '2026-07-01',
+      coordinatedPathway: true,
+      fullCoverage: true,
+      exemptFromParticipation: true,
+    });
+    expect(r.securiteSociale).toBe(30);
+    expect(r.restACharge).toBe(0);
+  });
+});
